@@ -57,7 +57,7 @@ func main() {
 		concurrency       int
 		duration          int
 		timeout           float64
-		qps               int
+		qps               float64
 		maxWorkers        int
 		enableSecondStats bool
 		file              string
@@ -72,7 +72,7 @@ func main() {
 	flag.IntVar(&concurrency, "concurrency", 0, "并发数（与qps互斥）")
 	flag.IntVar(&duration, "duration", 30, "测试持续时间(秒)")
 	flag.Float64Var(&timeout, "timeout", 5, "请求超时时间(秒)")
-	flag.IntVar(&qps, "qps", 0, "每秒请求数（与concurrency互斥）")
+	flag.Float64Var(&qps, "qps", 0, "每秒请求数，支持小数（如 0.5），与concurrency互斥")
 	flag.IntVar(&maxWorkers, "max-workers", 2000, "QPS模式下的最大并发数")
 	flag.BoolVar(&enableSecondStats, "enable-second-stats", false, "是否记录每秒的统计信息（不需要指定值，使用该参数即表示启用）")
 	flag.StringVar(&file, "file", "", "输入文件路径，如果指定则使用文件内容作为请求体")
@@ -126,7 +126,7 @@ func main() {
 	if concurrency > 0 {
 		fmt.Printf("  模式: 并发模式, 并发数: %d\n", concurrency)
 	} else {
-		fmt.Printf("  模式: QPS模式, QPS: %d\n", qps)
+		fmt.Printf("  模式: QPS模式, QPS: %g\n", qps)
 	}
 	fmt.Printf("  持续时间: %d秒\n", duration)
 	fmt.Printf("  超时时间: %.3f秒\n", timeout)

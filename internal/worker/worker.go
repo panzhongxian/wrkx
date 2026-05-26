@@ -21,7 +21,7 @@ type Worker struct {
 	concurrency int
 	duration    time.Duration
 	timeout     time.Duration
-	qps         int
+	qps         float64
 	stats       *RequestStats
 	wg          *sync.WaitGroup
 	stopChan    chan struct{}
@@ -125,7 +125,7 @@ func createClient(srcIP string) *http.Client {
 	}
 }
 
-func NewWorker(url string, concurrency int, duration time.Duration, timeout time.Duration, qps int, generator gen.RequestGenerator, enableSecondStats bool, method string, headers string, srcIP string) *Worker {
+func NewWorker(url string, concurrency int, duration time.Duration, timeout time.Duration, qps float64, generator gen.RequestGenerator, enableSecondStats bool, method string, headers string, srcIP string) *Worker {
 	// 根据QPS动态调整最大并发数
 	maxWorkers := int32(1000)
 	if qps > 0 {
@@ -283,25 +283,19 @@ func (w *Worker) worker() {
 func (w *Worker) qpsWorker() {
 	defer w.wg.Done()
 
-	// 计算每个10ms间隔需要发送的请求数
-	intervalCount := 50 // 1秒分成100个10ms的间隔
-	baseRequests := w.qps / intervalCount
-	remainder := w.qps % intervalCount
-	tickerInterval := 1000 * time.Millisecond / time.Duration(intervalCount)
+	// 使用 token 累积器算法，支持任意小数 QPS（如 0.5、1.5 等）。
+	// 每 10ms tick 一次，每次向累积器加入 qps/100 个 token；
+	// 当累积值 >= 1 时取整数部分作为本次发送的请求数，余数留到下一轮。
+	// 示例：qps=0.5 → tokensPerTick=0.005，每 200 tick（2s）发 1 次请求。
+	tickInterval := 10 * time.Millisecond
+	ticksPerSecond := float64(time.Second) / float64(tickInterval) // 100
+	tokensPerTick := w.qps / ticksPerSecond
 
-	// 预计算每个间隔的请求数
-	requestsPerInterval := make([]int, intervalCount)
-	for i := 0; i < intervalCount; i++ {
-		requestsPerInterval[i] = baseRequests
-		if i < remainder {
-			requestsPerInterval[i]++
-		}
-	}
+	// 通道容量取 max(qps*2, 2)，确保极低 QPS 时也至少有 2 的缓冲
+	chanSize := int(w.qps*2) + 2
+	requestChan := make(chan struct{}, chanSize)
 
-	// 创建请求发送通道
-	requestChan := make(chan struct{}, w.qps*2) // 增加通道大小
-
-	// 启动请求发送器
+	// 启动请求执行 worker
 	activeWorkers := int32(0)
 	for i := 0; i < int(w.maxWorkers); i++ {
 		w.wg.Add(1)
@@ -321,39 +315,31 @@ func (w *Worker) qpsWorker() {
 		}()
 	}
 
-	// 使用10ms的ticker
-	ticker := time.NewTicker(tickerInterval)
+	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
-	// 当前间隔的索引
-	intervalIndex := 0
-
-	// 等待所有worker启动
+	// 等待所有 worker 启动
 	time.Sleep(100 * time.Millisecond)
 	fmt.Printf("Active workers: %d\n", atomic.LoadInt32(&activeWorkers))
 
+	accum := 0.0
 	for {
 		select {
 		case <-w.stopChan:
 			fmt.Println("Stopping QPS worker...")
 			return
 		case <-ticker.C:
-			// 获取当前间隔需要发送的请求数
-			requestsToSend := requestsPerInterval[intervalIndex]
+			accum += tokensPerTick
+			toSend := int(accum)
+			accum -= float64(toSend)
 
-			// 更新间隔索引
-			intervalIndex = (intervalIndex + 1) % intervalCount
-
-			// 发送请求
-			for i := 0; i < requestsToSend; i++ {
+			for i := 0; i < toSend; i++ {
 				select {
 				case requestChan <- struct{}{}:
-					// 请求已发送到通道
 				case <-w.stopChan:
 					fmt.Println("Stopping QPS worker...")
 					return
 				default:
-					// 通道已满，跳过这个请求
 					fmt.Printf("Channel is full (len: %d), skip this request\n", len(requestChan))
 					w.stats.RecordError()
 				}
