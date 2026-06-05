@@ -3,6 +3,7 @@ package gen
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -24,21 +25,11 @@ func NewFileGenerator(filePath string) (*FileGenerator, error) {
 	// Read all files
 	for _, path := range filePaths {
 		path = strings.TrimSpace(path)
-		file, err := os.Open(path)
+		lines, err := readLinesFromFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open file %s: %v", path, err)
+			return nil, err
 		}
-		defer file.Close()
-
-		// Read all lines from this file
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			allLines = append(allLines, scanner.Text())
-		}
-
-		if err := scanner.Err(); err != nil {
-			return nil, fmt.Errorf("error reading file %s: %v", path, err)
-		}
+		allLines = append(allLines, lines...)
 	}
 
 	if len(allLines) == 0 {
@@ -50,6 +41,32 @@ func NewFileGenerator(filePath string) (*FileGenerator, error) {
 		lines:     allLines,
 		index:     0,
 	}, nil
+}
+
+// readLinesFromFile 从单个文件中读取所有行，文件用完立即关闭
+func readLinesFromFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file %s: %v", path, err)
+	}
+	defer file.Close()
+
+	var lines []string
+	reader := bufio.NewReader(file)
+	for {
+		line, err := reader.ReadString('\n')
+		line = strings.TrimRight(line, "\r\n")
+		if line != "" {
+			lines = append(lines, line)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error reading file %s: %v", path, err)
+		}
+	}
+	return lines, nil
 }
 
 // Generate 生成下一行内容，如果到达文件末尾则从头开始

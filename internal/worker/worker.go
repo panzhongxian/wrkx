@@ -8,9 +8,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/panzhongxian/wrkx/internal/gen"
@@ -25,6 +28,7 @@ type Worker struct {
 	stats       *RequestStats
 	wg          *sync.WaitGroup
 	stopChan    chan struct{}
+	stopOnce    sync.Once
 	generator   gen.RequestGenerator
 	// QPS模式下的并发控制
 	activeWorkers int32
@@ -37,6 +41,13 @@ type Worker struct {
 	headers map[string]string
 	srcIP   string
 	client  *http.Client
+}
+
+// closeStopChan 用 sync.Once 保证 stopChan 只被关闭一次
+func (w *Worker) closeStopChan() {
+	w.stopOnce.Do(func() {
+		close(w.stopChan)
+	})
 }
 
 // createDialContext 创建一个支持指定source IP和DNS缓存的DialContext
@@ -275,8 +286,8 @@ func (w *Worker) worker() {
 		case <-w.stopChan:
 			return
 		default:
-			w.makeRequest()
 		}
+		w.makeRequest()
 	}
 }
 
@@ -295,6 +306,9 @@ func (w *Worker) qpsWorker() {
 	chanSize := int(w.qps*2) + 2
 	requestChan := make(chan struct{}, chanSize)
 
+	// doneChan 用于通知执行 worker 在 requestChan drain 后退出
+	doneChan := make(chan struct{})
+
 	// 启动请求执行 worker
 	activeWorkers := int32(0)
 	for i := 0; i < int(w.maxWorkers); i++ {
@@ -306,10 +320,18 @@ func (w *Worker) qpsWorker() {
 
 			for {
 				select {
-				case <-w.stopChan:
-					return
 				case <-requestChan:
 					w.makeRequest()
+				case <-doneChan:
+					// 投递已停止，drain requestChan 中剩余请求后退出
+					for {
+						select {
+						case <-requestChan:
+							w.makeRequest()
+						default:
+							return
+						}
+					}
 				}
 			}
 		}()
@@ -326,7 +348,9 @@ func (w *Worker) qpsWorker() {
 	for {
 		select {
 		case <-w.stopChan:
+			// 停止投递新请求，关闭 doneChan 通知执行 worker 做最后 drain
 			fmt.Println("Stopping QPS worker...")
+			close(doneChan)
 			return
 		case <-ticker.C:
 			accum += tokensPerTick
@@ -338,6 +362,7 @@ func (w *Worker) qpsWorker() {
 				case requestChan <- struct{}{}:
 				case <-w.stopChan:
 					fmt.Println("Stopping QPS worker...")
+					close(doneChan)
 					return
 				default:
 					fmt.Printf("Channel is full (len: %d), skip this request\n", len(requestChan))
@@ -351,6 +376,24 @@ func (w *Worker) qpsWorker() {
 func (w *Worker) Start() {
 	// 启动统计收集器
 	w.statsCollector.Start()
+
+	startTime := time.Now()
+
+	// 监听 Ctrl+C / SIGTERM，优雅退出：停止投递，等待在途请求完成
+	// 第二次 Ctrl+C 强制退出
+	sigChan := make(chan os.Signal, 2)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		fmt.Println("\n收到中断信号，停止投递新请求，等待在途请求完成...")
+		fmt.Println("再次按 Ctrl+C 可强制退出（数据可能不完整）")
+		w.closeStopChan()
+
+		// 第二次信号：强制退出
+		<-sigChan
+		fmt.Println("\n强制退出")
+		os.Exit(1)
+	}()
 
 	// 启动工作协程
 	if w.qps > 0 {
@@ -367,14 +410,17 @@ func (w *Worker) Start() {
 
 	// 设置测试时间
 	time.AfterFunc(w.duration, func() {
-		close(w.stopChan)
+		w.closeStopChan()
 	})
 
 	// 等待所有工作协程完成
 	w.wg.Wait()
 
-	// 计算每秒请求数
-	w.stats.RequestsPerSec = float64(w.stats.TotalRequests) / w.duration.Seconds()
+	signal.Stop(sigChan)
+
+	// 用停止投递的时刻计算 QPS（不含 drain 等待时间）
+	elapsed := time.Since(startTime)
+	w.stats.RequestsPerSec = float64(w.stats.TotalRequests) / elapsed.Seconds()
 
 	// 停止统计收集器
 	w.statsCollector.Stop()
