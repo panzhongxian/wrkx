@@ -14,6 +14,9 @@ import (
 	"github.com/panzhongxian/wrkx/internal/worker"
 )
 
+// version 由构建时通过 -ldflags "-X main.version=..." 注入，默认为 dev
+var version = "dev"
+
 // isIPAvailable 检查指定的IP地址是否可用
 func isIPAvailable(ip string) bool {
 	// 解析IP地址
@@ -66,6 +69,7 @@ func main() {
 		method            string
 		headers           string
 		srcIP             string
+		showVersion       bool
 	)
 
 	flag.StringVar(&url, "url", "http://localhost:8080/delay", "测试目标URL")
@@ -75,6 +79,7 @@ func main() {
 	flag.Float64Var(&qps, "qps", 0, "每秒请求数，支持小数（如 0.5），与concurrency互斥")
 	flag.IntVar(&maxWorkers, "max-workers", 2000, "QPS模式下的最大并发数")
 	flag.BoolVar(&enableSecondStats, "enable-second-stats", false, "是否记录每秒的统计信息（不需要指定值，使用该参数即表示启用）")
+	flag.BoolVar(&showVersion, "version", false, "显示版本信息")
 	flag.StringVar(&file, "file", "", "输入文件路径，如果指定则使用文件内容作为请求体")
 	flag.StringVar(&reqTemplate, "req-template", "", "请求模板，用于从CSV文件生成请求体")
 	flag.StringVar(&request, "request", "", "请求体字符串，如果指定则file和req-template必须为空")
@@ -96,7 +101,7 @@ func main() {
 		arg := args[i]
 		if strings.HasPrefix(arg, "--") {
 			// 检查是否是布尔参数
-			if arg == "--enable-second-stats" {
+			if arg == "--enable-second-stats" || arg == "--version" {
 				continue
 			}
 			// 检查下一个参数是否是值
@@ -115,6 +120,11 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if showVersion {
+		fmt.Printf("wrkx version %s\n", version)
+		return
+	}
 
 	// 打印所有参数值，帮助调试
 	fmt.Printf("参数值:\n")

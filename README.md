@@ -49,14 +49,35 @@ wrkx/
 
 ### 安装
 
+#### 方式一：直接下载预编译二进制（无需 Go 环境）
+
+前往 [Releases 页面](https://github.com/panzhongxian/wrkx/releases)，根据你的系统下载对应压缩包，解压即可使用：
+
+| 系统 | 文件 | 说明 |
+| --- | --- | --- |
+| macOS (Intel) | `wrkx_x.y.z_darwin_amd64.tar.gz` | 解压后得到 `wrkx` |
+| macOS (Apple Silicon) | `wrkx_x.y.z_darwin_arm64.tar.gz` | 解压后得到 `wrkx` |
+| Windows (x64) | `wrkx_x.y.z_windows_amd64.zip` | 解压后得到 `wrkx.exe` |
+| Linux (x64) | `wrkx_x.y.z_linux_amd64.tar.gz` | 解压后得到 `wrkx` |
+
+macOS 首次运行如遇「无法验证开发者」提示，执行：
+
+```bash
+xcode-select --install  # 若提示需要
+xattr -d com.apple.quarantine ./wrkx
+```
+
+#### 方式二：使用 Go 安装
+
 ```bash
 go install github.com/panzhongxian/wrkx/cmd/wrkx@latest
 ```
 
-从源码安装：
+#### 方式三：从源码编译
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/panzhongxian/wrkx
+cd wrkx
 go build -o wrkx ./cmd/wrkx
 ```
 
