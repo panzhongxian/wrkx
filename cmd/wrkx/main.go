@@ -95,30 +95,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\n注意：布尔类型参数（如 --enable-second-stats）不需要指定值，直接使用参数名即可\n")
 	}
 
-	// 检查是否有未定义的参数
-	args := os.Args[1:]
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "--") {
-			// 检查是否是布尔参数
-			if arg == "--enable-second-stats" || arg == "--version" {
-				continue
-			}
-			// 检查下一个参数是否是值
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				i++ // 跳过值
-				continue
-			}
-			// 检查是否是等号形式
-			if strings.Contains(arg, "=") {
-				continue
-			}
-			fmt.Printf("错误：未知参数 %s\n", arg)
-			flag.Usage()
-			os.Exit(1)
-		}
-	}
-
 	flag.Parse()
 
 	if showVersion {

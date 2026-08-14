@@ -28,25 +28,6 @@ builds:
       - goos: windows
         goarch: arm64
 
-  - id: wrkx-server
-    main: ./cmd/server
-    binary: wrkx-server
-    env:
-      - CGO_ENABLED=0
-    flags:
-      - -trimpath
-    ldflags:
-      - -s -w -X main.version={{ .Version }}
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
 
 archives:
   # unix 用 tar.gz，Windows 用 zip
